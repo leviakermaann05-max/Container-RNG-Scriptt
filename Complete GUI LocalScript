@@ -1,0 +1,623 @@
+
+--// DEXTER'S PREMIUM C-RNG V4
+--// CLIENT GUI
+--// Place in StarterPlayer > StarterPlayerScripts
+--// This is a LocalScript.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local CONFIG = {
+    MinSpeed = 8,
+    MaxSpeed = 40,
+    DefaultSpeed = 16,
+    Step = 1,
+}
+
+local COLORS = {
+    Background = Color3.fromRGB(15, 13, 23),
+    Panel = Color3.fromRGB(27, 23, 40),
+    Button = Color3.fromRGB(46, 38, 65),
+    Accent = Color3.fromRGB(145, 85, 245),
+    AccentDark = Color3.fromRGB(91, 51, 151),
+    Text = Color3.fromRGB(248, 245, 255),
+    Muted = Color3.fromRGB(175, 165, 190),
+    Green = Color3.fromRGB(70, 210, 125),
+    Red = Color3.fromRGB(235, 85, 105),
+}
+
+--// REMOTES
+local remoteFolder = ReplicatedStorage:WaitForChild("CNRG_Remotes", 15)
+if not remoteFolder then
+    warn("[CNRG Client] Missing CNRG_Remotes. Start the server script first.")
+    return
+end
+
+local SetAutomation = remoteFolder:WaitForChild("SetAutomation")
+local SetSpeed = remoteFolder:WaitForChild("SetSpeed")
+local GetStatus = remoteFolder:WaitForChild("GetStatus")
+local Notify = remoteFolder:WaitForChild("Notify")
+
+--// STATE
+local state = {
+    Collect = false,
+    Sell = false,
+    Potions = false,
+    LootESP = false,
+    ContainerESP = false,
+    Speed = CONFIG.DefaultSpeed,
+}
+
+local toggleButtons = {}
+local highlights = {}
+
+--// CLEAR PREVIOUS GUI
+local previous = playerGui:FindFirstChild("DextersPremiumCRNG")
+if previous then
+    previous:Destroy()
+end
+
+--// UI HELPERS
+local function create(className, properties, parent)
+    local object = Instance.new(className)
+
+    for property, value in pairs(properties or {}) do
+        object[property] = value
+    end
+
+    object.Parent = parent
+    return object
+end
+
+local function corner(object, radius)
+    create("UICorner", {
+        CornerRadius = UDim.new(0, radius or 9),
+    }, object)
+end
+
+local function outline(object, color, thickness)
+    create("UIStroke", {
+        Color = color or COLORS.Accent,
+        Thickness = thickness or 1,
+        Transparency = 0.25,
+    }, object)
+end
+
+local function makeLabel(parent, text, size, position, textSize, color)
+    return create("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = size,
+        Position = position,
+        Text = text,
+        TextColor3 = color or COLORS.Text,
+        TextSize = textSize or 14,
+        Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+    }, parent)
+end
+
+local function makeDraggable(frame, handle)
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPosition
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            dragging = true
+            dragStart = input.Position
+            startPosition = frame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input == dragInput then
+            local delta = input.Position - dragStart
+
+            frame.Position = UDim2.new(
+                startPosition.X.Scale,
+                startPosition.X.Offset + delta.X,
+                startPosition.Y.Scale,
+                startPosition.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+--// SCREEN GUI
+local gui = create("ScreenGui", {
+    Name = "DextersPremiumCRNG",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 100,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, playerGui)
+
+--// LAUNCHER
+local launcher = create("TextButton", {
+    Name = "Launcher",
+    Size = UDim2.fromOffset(165, 46),
+    Position = UDim2.new(0, 18, 0.5, -23),
+    BackgroundColor3 = COLORS.AccentDark,
+    Text = "✦  DEXTER'S V4",
+    TextColor3 = COLORS.Text,
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    Active = true,
+    AutoButtonColor = true,
+}, gui)
+corner(launcher, 11)
+outline(launcher, COLORS.Accent, 1.5)
+makeDraggable(launcher, launcher)
+
+--// MAIN WINDOW
+local window = create("Frame", {
+    Name = "MainWindow",
+    Size = UDim2.new(0, 370, 0, 430),
+    Position = UDim2.new(0.5, -185, 0.5, -215),
+    BackgroundColor3 = COLORS.Background,
+    Visible = false,
+    Active = true,
+    ClipsDescendants = true,
+}, gui)
+corner(window, 14)
+outline(window, COLORS.Accent, 1.5)
+
+--// HEADER
+local header = create("Frame", {
+    Name = "Header",
+    Size = UDim2.new(1, 0, 0, 58),
+    BackgroundColor3 = COLORS.Panel,
+    Active = true,
+}, window)
+
+local title = makeLabel(
+    header,
+    "✦  DEXTER'S PREMIUM",
+    UDim2.new(1, -65, 0, 27),
+    UDim2.fromOffset(15, 5),
+    16
+)
+title.Font = Enum.Font.GothamBold
+
+local subtitle = makeLabel(
+    header,
+    "C-RNG V4  |  GAME PANEL",
+    UDim2.new(1, -65, 0, 18),
+    UDim2.fromOffset(16, 31),
+    10,
+    COLORS.Muted
+)
+
+local close = create("TextButton", {
+    Size = UDim2.fromOffset(32, 32),
+    Position = UDim2.new(1, -43, 0, 12),
+    BackgroundColor3 = COLORS.Button,
+    Text = "×",
+    TextColor3 = COLORS.Text,
+    TextSize = 22,
+    Font = Enum.Font.GothamBold,
+}, header)
+corner(close, 8)
+
+makeDraggable(window, header)
+
+--// TAB BAR
+local tabBar = create("Frame", {
+    Size = UDim2.new(1, -24, 0, 38),
+    Position = UDim2.fromOffset(12, 68),
+    BackgroundTransparency = 1,
+}, window)
+
+local tabLayout = create("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    Padding = UDim.new(0, 7),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, tabBar)
+
+local content = create("Frame", {
+    Name = "Content",
+    Size = UDim2.new(1, -24, 1, -120),
+    Position = UDim2.fromOffset(12, 112),
+    BackgroundTransparency = 1,
+}, window)
+
+local pages = {}
+local tabs = {}
+
+local function newPage(name)
+    local page = create("ScrollingFrame", {
+        Name = name,
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = COLORS.Accent,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Visible = false,
+    }, content)
+
+    create("UIListLayout", {
+        Padding = UDim.new(0, 9),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, page)
+
+    pages[name] = page
+    return page
+end
+
+local farmPage = newPage("FARM")
+local playerPage = newPage("PLAYER")
+local espPage = newPage("ESP")
+
+local function showPage(name)
+    for pageName, page in pairs(pages) do
+        page.Visible = pageName == name
+    end
+
+    for tabName, button in pairs(tabs) do
+        button.BackgroundColor3 = tabName == name
+            and COLORS.AccentDark
+            or COLORS.Button
+    end
+end
+
+local function addTab(name)
+    local button = create("TextButton", {
+        Name = name .. "Tab",
+        Size = UDim2.new(1/3, -5, 1, 0),
+        BackgroundColor3 = COLORS.Button,
+        Text = name,
+        TextColor3 = COLORS.Text,
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+    }, tabBar)
+
+    corner(button, 8)
+    tabs[name] = button
+
+    button.Activated:Connect(function()
+        showPage(name)
+    end)
+end
+
+addTab("FARM")
+addTab("PLAYER")
+addTab("ESP")
+
+--// BUTTONS
+local function addButton(parent, text, callback, order)
+    local button = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 42),
+        BackgroundColor3 = COLORS.Button,
+        Text = text,
+        TextColor3 = COLORS.Text,
+        TextSize = 13,
+        Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        AutoButtonColor = true,
+        LayoutOrder = order or 1,
+    }, parent)
+
+    corner(button, 9)
+
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 12),
+        PaddingRight = UDim.new(0, 10),
+    }, button)
+
+    button.Activated:Connect(callback)
+    return button
+end
+
+local function addSection(parent, text, order)
+    local section = makeLabel(
+        parent,
+        text,
+        UDim2.new(1, 0, 0, 24),
+        UDim2.new(),
+        12,
+        COLORS.Muted
+    )
+    section.Font = Enum.Font.GothamBold
+    section.LayoutOrder = order or 1
+    return section
+end
+
+local function refreshToggle(feature)
+    local button = toggleButtons[feature]
+    if not button then
+        return
+    end
+
+    local titleText = button:GetAttribute("LabelText") or feature
+    local enabled = state[feature]
+
+    button.Text = titleText .. "     " .. (enabled and "ON" or "OFF")
+    button.BackgroundColor3 = enabled
+        and COLORS.AccentDark
+        or COLORS.Button
+end
+
+local function addAutomationToggle(parent, feature, titleText, order)
+    local button = addButton(parent, titleText, function()
+        state[feature] = not state[feature]
+        refreshToggle(feature)
+        SetAutomation:FireServer(feature, state[feature])
+    end, order)
+
+    button:SetAttribute("LabelText", titleText)
+    toggleButtons[feature] = button
+    refreshToggle(feature)
+    return button
+end
+
+--// FARM PAGE
+addSection(farmPage, "AUTOMATION", 1)
+addAutomationToggle(farmPage, "Collect", "Auto Collect", 2)
+addAutomationToggle(farmPage, "Sell", "Auto Sell", 3)
+addAutomationToggle(farmPage, "Potions", "Auto Buy Luck Potions", 4)
+
+local farmHint = makeLabel(
+    farmPage,
+    "Auto Sell only works near an NPC buyer. Auto Potions buys Luck Potions.",
+    UDim2.new(1, -4, 0, 45),
+    UDim2.new(),
+    11,
+    COLORS.Muted
+)
+farmHint.TextWrapped = true
+farmHint.LayoutOrder = 5
+
+--// PLAYER PAGE
+addSection(playerPage, "MOVEMENT", 1)
+
+local speedLabel = makeLabel(
+    playerPage,
+    "WalkSpeed: " .. state.Speed,
+    UDim2.new(1, 0, 0, 35),
+    UDim2.new(),
+    16
+)
+speedLabel.Font = Enum.Font.GothamBold
+speedLabel.LayoutOrder = 2
+
+local speedRow = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 44),
+    BackgroundTransparency = 1,
+    LayoutOrder = 3,
+}, playerPage)
+
+local minus = create("TextButton", {
+    Size = UDim2.new(0.48, 0, 1, 0),
+    BackgroundColor3 = COLORS.Button,
+    Text = "−1",
+    TextColor3 = COLORS.Text,
+    TextSize = 18,
+    Font = Enum.Font.GothamBold,
+}, speedRow)
+corner(minus, 9)
+
+local plus = create("TextButton", {
+    Size = UDim2.new(0.48, 0, 1, 0),
+    Position = UDim2.new(0.52, 0, 0, 0),
+    BackgroundColor3 = COLORS.Button,
+    Text = "+1",
+    TextColor3 = COLORS.Text,
+    TextSize = 18,
+    Font = Enum.Font.GothamBold,
+}, speedRow)
+corner(plus, 9)
+
+local function updateSpeed(value)
+    state.Speed = math.clamp(
+        math.floor(value),
+        CONFIG.MinSpeed,
+        CONFIG.MaxSpeed
+    )
+
+    speedLabel.Text = "WalkSpeed: " .. state.Speed
+    SetSpeed:FireServer(state.Speed)
+end
+
+minus.Activated:Connect(function()
+    updateSpeed(state.Speed - CONFIG.Step)
+end)
+
+plus.Activated:Connect(function()
+    updateSpeed(state.Speed + CONFIG.Step)
+end)
+
+local speedHint = makeLabel(
+    playerPage,
+    "Allowed range: " .. CONFIG.MinSpeed .. "–" .. CONFIG.MaxSpeed,
+    UDim2.new(1, 0, 0, 25),
+    UDim2.new(),
+    11,
+    COLORS.Muted
+)
+speedHint.LayoutOrder = 4
+
+--// ESP PAGE
+addSection(espPage, "VISUALS", 1)
+
+local function refreshESP(tagName, enabled)
+    for object, highlight in pairs(highlights) do
+        if highlight:GetAttribute("TagName") == tagName then
+            highlight:Destroy()
+            highlights[object] = nil
+        end
+    end
+
+    if not enabled then
+        return
+    end
+
+    for _, object in ipairs(CollectionService:GetTagged(tagName)) do
+        if object:IsA("BasePart") or object:IsA("Model") then
+            local highlight = Instance.new("Highlight")
+            highlight.Name = "DexterESP"
+            highlight.Adornee = object
+            highlight.FillColor = COLORS.Accent
+            highlight.OutlineColor = Color3.new(1, 1, 1)
+            highlight.FillTransparency = 0.65
+            highlight:SetAttribute("TagName", tagName)
+            highlight.Parent = object
+            highlights[object] = highlight
+        end
+    end
+end
+
+local lootButton
+lootButton = addButton(espPage, "Loot ESP: OFF", function()
+    state.LootESP = not state.LootESP
+    lootButton.Text = "Loot ESP: " .. (state.LootESP and "ON" or "OFF")
+    lootButton.BackgroundColor3 = state.LootESP
+        and COLORS.AccentDark
+        or COLORS.Button
+
+    refreshESP("CNRG_Loot", state.LootESP)
+end, 2)
+
+local containerButton
+containerButton = addButton(espPage, "Container ESP: OFF", function()
+    state.ContainerESP = not state.ContainerESP
+    containerButton.Text = "Container ESP: " ..
+        (state.ContainerESP and "ON" or "OFF")
+    containerButton.BackgroundColor3 = state.ContainerESP
+        and COLORS.AccentDark
+        or COLORS.Button
+
+    refreshESP("CNRG_Container", state.ContainerESP)
+end, 3)
+
+local espHint = makeLabel(
+    espPage,
+    "Use Studio's Tag Editor to tag your objects: CNRG_Loot and CNRG_Container.",
+    UDim2.new(1, -4, 0, 48),
+    UDim2.new(),
+    11,
+    COLORS.Muted
+)
+espHint.TextWrapped = true
+espHint.LayoutOrder = 4
+
+local function onTaggedAdded(tagName, object, enabled)
+    if not enabled then
+        return
+    end
+
+    if not (object:IsA("BasePart") or object:IsA("Model")) then
+        return
+    end
+
+    if highlights[object] then
+        return
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "DexterESP"
+    highlight.Adornee = object
+    highlight.FillColor = COLORS.Accent
+    highlight.OutlineColor = Color3.new(1, 1, 1)
+    highlight.FillTransparency = 0.65
+    highlight:SetAttribute("TagName", tagName)
+    highlight.Parent = object
+    highlights[object] = highlight
+end
+
+CollectionService:GetInstanceAddedSignal("CNRG_Loot"):Connect(function(object)
+    onTaggedAdded("CNRG_Loot", object, state.LootESP)
+end)
+
+CollectionService:GetInstanceAddedSignal("CNRG_Container"):Connect(function(object)
+    onTaggedAdded("CNRG_Container", object, state.ContainerESP)
+end)
+
+CollectionService:GetInstanceRemovedSignal("CNRG_Loot"):Connect(function(object)
+    local highlight = highlights[object]
+    if highlight and highlight:GetAttribute("TagName") == "CNRG_Loot" then
+        highlight:Destroy()
+        highlights[object] = nil
+    end
+end)
+
+CollectionService:GetInstanceRemovedSignal("CNRG_Container"):Connect(function(object)
+    local highlight = highlights[object]
+    if highlight and highlight:GetAttribute("TagName") == "CNRG_Container" then
+        highlight:Destroy()
+        highlights[object] = nil
+    end
+end)
+
+--// OPEN / CLOSE
+launcher.Activated:Connect(function()
+    window.Visible = not window.Visible
+end)
+
+close.Activated:Connect(function()
+    window.Visible = false
+end)
+
+--// SERVER STATUS
+Notify.OnClientEvent:Connect(function(message)
+    local StarterGui = game:GetService("StarterGui")
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "Dexter's Premium C-RNG",
+            Text = tostring(message),
+            Duration = 3,
+        })
+    end)
+end)
+
+task.spawn(function()
+    local success, result = pcall(function()
+        return GetStatus:InvokeServer()
+    end)
+
+    if not success or typeof(result) ~= "table" then
+        warn("[CNRG Client] Could not load server status")
+        return
+    end
+
+    if typeof(result.Automation) == "table" then
+        for feature, enabled in pairs(result.Automation) do
+            if state[feature] ~= nil and typeof(enabled) == "boolean" then
+                state[feature] = enabled
+                refreshToggle(feature)
+            end
+        end
+    end
+
+    if typeof(result.Speed) == "number" then
+        state.Speed = result.Speed
+        speedLabel.Text = "WalkSpeed: " .. state.Speed
+    end
+end)
+
+showPage("FARM")
+
+print("[CNRG Client] Dexter's Premium C-RNG V4 loaded")
